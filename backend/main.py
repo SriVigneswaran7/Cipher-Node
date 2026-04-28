@@ -71,11 +71,21 @@ async def serial_reader():
                                 ser.write(b'U')
                                 log_attempt(current_attempt, "SUCCESS")
                                 await broadcast({"type": "AUTH_RESULT", "status": "SUCCESS"})
+                                
+                                # NEW: The True Hardware Auto-Lock
+                                async def auto_lock():
+                                    await asyncio.sleep(5) # Wait 5 seconds
+                                    if ser:
+                                        ser.write(b'L') # Physically lock the Arduino
+                                    await broadcast({"type": "AUTH_RESULT", "status": "LOCKED"}) # Tell React
+                                    
+                                asyncio.create_task(auto_lock())
+
                             else:
                                 log_attempt(current_attempt, "DENIED")
                                 await broadcast({"type": "AUTH_RESULT", "status": "DENIED"})
                             
-                            current_attempt = ""
+                            current_attempt = "" # Reset
             except json.JSONDecodeError:
                 pass # Ignore malformed serial noise
         await asyncio.sleep(0.01)
