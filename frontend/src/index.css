@@ -1,20 +1,20 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss"; /* <--- THIS IS THE V4 FIX */
 
 :root {
-  background-color: #020617; /* Deep Slate 950 */
+  background-color: #020617;
   color: white;
 }
 
 body {
   margin: 0;
   font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden; 
 }
 
-/* Glassmorphism utility */
+/* Glassmorphism Base Class */
 .glass {
-  background: rgba(30, 41, 59, 0.5);
+  background: rgba(30, 41, 59, 0.4);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
