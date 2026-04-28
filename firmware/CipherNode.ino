@@ -1,113 +1,94 @@
 #include <Servo.h>
 
-// --- Configuration ---
-const int SECRET_CODE[] = {4, 0, 4}; // The combination
-const int CODE_LENGTH = 3;
-
-// --- Pins ---
-const int BTN_CYCLE = 2;
-const int BTN_ENTER = 3;
+// Pin Map
+const int BTN_1 = 2;      // Cycle / Input 1
+const int BTN_2 = 3;      // Enter / Input 2
 const int LED_RED = 8;
 const int LED_GREEN = 9;
 const int SERVO_PIN = 10;
 
-// --- State Variables ---
+// State Variables
 Servo lockServo;
-int currentDigit = 0;
-int enteredCode[3];
-int attemptIndex = 0;
+unsigned long lastHeartbeat = 0;
+const unsigned long WATCHDOG_TIMEOUT = 5000; // 5 Seconds
 bool isLocked = true;
 
 void setup() {
   Serial.begin(9600);
   
-  pinMode(BTN_CYCLE, INPUT_PULLUP);
-  pinMode(BTN_ENTER, INPUT_PULLUP);
+  pinMode(BTN_1, INPUT_PULLUP);
+  pinMode(BTN_2, INPUT_PULLUP);
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   
   lockServo.attach(SERVO_PIN);
-  updateHardware(true); // Start locked
   
-  // Initial Telemetry
-  Serial.println("{\"event\": \"system_boot\", \"status\": \"ready\"}");
+  // Initial State: Locked
+  executeLock();
+  lastHeartbeat = millis(); 
+  
+  Serial.println("{\"event\": \"node_boot\", \"status\": \"awaiting_brain\"}");
 }
 
 void loop() {
-  // Check for Remote Override from Python (Phase 3 Prep)
+  unsigned long currentTime = millis();
+
+  // 1. Watchdog Timer:
+  if (!isLocked && (currentTime - lastHeartbeat > WATCHDOG_TIMEOUT)) {
+    executeLock();
+    Serial.println("{\"event\": \"watchdog_trigger\", \"reason\": \"heartbeat_lost\"}");
+  }
+
+  // 2. Input Relay: Every click is sent to the Mac as JSON.
+  checkButton(BTN_1, "btn_1");
+  checkButton(BTN_2, "btn_2");
+
+  // 3. Command Parser: Listen for the Brain
   if (Serial.available() > 0) {
     char cmd = Serial.read();
-    if (cmd == 'U') handleSuccess(); // 'U' for Unlock
-    if (cmd == 'L') updateHardware(true); // 'L' for Lock
-  }
-
-  // Physical Button Logic
-  if (digitalRead(BTN_CYCLE) == LOW) {
-    currentDigit = (currentDigit + 1) % 10;
     
-    // Telemetry: Current selection
-    Serial.print("{\"event\": \"digit_cycle\", \"value\": ");
-    Serial.print(currentDigit);
-    Serial.println("}");
-    
-    delay(250); // Debounce
-  }
-
-  if (digitalRead(BTN_ENTER) == LOW) {
-    enteredCode[attemptIndex] = currentDigit;
-    attemptIndex++;
-
-    Serial.print("{\"event\": \"digit_entry\", \"index\": ");
-    Serial.print(attemptIndex);
-    Serial.println("}");
-
-    if (attemptIndex >= CODE_LENGTH) {
-      checkCode();
+    if (cmd == 'U') {
+      executeUnlock();
+      lastHeartbeat = millis();
+    } 
+    else if (cmd == 'L') {
+      executeLock();
+      lastHeartbeat = millis();
+    } 
+    else if (cmd == 'P') {
+      // Secret 'Ping'
+      lastHeartbeat = millis();
     }
-    
-    currentDigit = 0; // Reset digit for next position
-    delay(250); // Debounce
   }
 }
 
-void checkCode() {
-  bool match = true;
-  for (int i = 0; i < CODE_LENGTH; i++) {
-    if (enteredCode[i] != SECRET_CODE[i]) match = false;
-  }
+// Relays physical presses to Python and provides a tiny "tactile" blink
+void checkButton(int pin, String label) {
+  if (digitalRead(pin) == LOW) {
+    // Local Feedback: Flicker the Red LED so the user knows it registered
+    digitalWrite(LED_RED, LOW); 
+    delay(20); 
+    digitalWrite(LED_RED, isLocked ? HIGH : LOW);
 
-  if (match) {
-    handleSuccess();
-  } else {
-    handleFailure();
-  }
-  attemptIndex = 0;
-}
+    // Send Event
+    Serial.print("{\"event\": \"btn_press\", \"id\": \"");
+    Serial.print(label);
+    Serial.println("\"}");
 
-void handleSuccess() {
-  updateHardware(false);
-  Serial.println("{\"event\": \"access_granted\", \"status\": \"unlocked\"}");
-}
-
-void handleFailure() {
-  updateHardware(true);
-  Serial.println("{\"event\": \"access_denied\", \"status\": \"locked\"}");
-  // Flash red to show failure
-  for(int i=0; i<3; i++) {
-    digitalWrite(LED_RED, LOW); delay(100);
-    digitalWrite(LED_RED, HIGH); delay(100);
+    delay(250); // Simple debounce
   }
 }
 
-void updateHardware(bool locked) {
-  isLocked = locked;
-  if (locked) {
-    digitalWrite(LED_RED, HIGH);
-    digitalWrite(LED_GREEN, LOW);
-    lockServo.write(0);
-  } else {
-    digitalWrite(LED_RED, LOW);
-    digitalWrite(LED_GREEN, HIGH);
-    lockServo.write(90);
-  }
+void executeLock() {
+  isLocked = true;
+  digitalWrite(LED_RED, HIGH);
+  digitalWrite(LED_GREEN, LOW);
+  lockServo.write(0);
+}
+
+void executeUnlock() {
+  isLocked = false;
+  digitalWrite(LED_RED, LOW);
+  digitalWrite(LED_GREEN, HIGH);
+  lockServo.write(90);
 }
