@@ -1,20 +1,35 @@
-# Database
-audit_log.sqlite3
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-env/
-venv/
-ENV/
-
-# Arduino / IDE
-build/
-bin/
-.vscode/arduino.json
-
-# Operating System
+#OS / System
 .DS_Store
 Thumbs.db
+*.swp
+
+# Frontend (Node/React)
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/.eslintcache
+
+# Backend (Python)
+**/__pycache__/
+backend/.venv/
+backend/env/
+backend/venv/
+backend/ENV/
+*.py[cod]
+*$py.class
+
+# Database
+*.sqlite3
+backend/audit_log.sqlite3
+
+# Environment & Secrets
+.env
+backend/.env
+frontend/.env
+*.pem
+
+# Arduino / IDE
+firmware/build/
+firmware/bin/
+.vscode/
