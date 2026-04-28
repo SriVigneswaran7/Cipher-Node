@@ -1,0 +1,20 @@
+# Database
+audit_log.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Arduino / IDE
+build/
+bin/
+.vscode/arduino.json
+
+# Operating System
+.DS_Store
+Thumbs.db
