@@ -50,21 +50,22 @@ export default function App() {
 
     ws.onmessage = (event) => {
       const rawData = event.data;
-      addLog(`RECV: ${rawData}`); // Stream raw JSON to the Live Logs page
+      addLog(`RECV: ${rawData}`);
       
       const data = JSON.parse(rawData);
       
       if (data.type === "LIVE_PREVIEW") {
         setCurrentAttempt(data.current);
       } else if (data.type === "AUTH_RESULT") {
+        // Now it strictly obeys the Brain (SUCCESS = UNLOCKED, anything else = LOCKED)
         setStatus(data.status === "SUCCESS" ? "UNLOCKED" : "LOCKED");
         fetchAnalytics(); 
         
-        setTimeout(() => {
+        // Clean up the UI when the Brain tells us it locked
+        if (data.status === "LOCKED") {
           setCurrentAttempt("");
-          setStatus("LOCKED");
-          addLog("SYSTEM: Auto-locked via hardware timeout.");
-        }, 5000);
+          addLog("SYSTEM: Hardware secured and locked.");
+        }
       }
     };
 
@@ -81,7 +82,7 @@ export default function App() {
       <aside className="w-64 border-r border-slate-800/50 bg-slate-900/20 flex flex-col p-6 z-20">
         <div className="flex items-center gap-3 mb-10 text-indigo-500 font-bold text-xl">
           <Shield size={32} />
-          <span className="tracking-tighter">CIPHER_NODE</span>
+          <span className="tracking-tighter">Cipher-Node</span>
         </div>
         <nav className="space-y-4 flex-1">
           <SidebarItem icon={<Activity size={20}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
@@ -148,28 +149,28 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
     <>
       <div className="grid grid-cols-4 gap-6 mb-8">
           <div className="glass p-6 rounded-3xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
             <p className="text-indigo-300 text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-2">Live Input <Activity size={12}/></p>
             <h2 className="text-4xl font-mono font-bold mb-1 tracking-widest text-white h-10">{currentAttempt || "---"}</h2>
             <p className="text-[10px] text-slate-400 font-medium">{currentAttempt ? "Sequencing..." : "Awaiting input"}</p>
           </div>
 
           <div className={`glass p-6 rounded-3xl relative overflow-hidden transition-all duration-500 ${status === "UNLOCKED" ? "border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]" : ""}`}>
-            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-gradient-to-br from-fuchsia-500 to-rose-500"}`}></div>
+            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-linear-to-br from-fuchsia-500 to-rose-500"}`}></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Status</p>
             <h2 className={`text-3xl font-bold mb-1 tracking-tighter ${status === "UNLOCKED" ? "text-emerald-400" : "text-rose-400"}`}>{status}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Hardware Relay</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Uptime</p>
             <h2 className="text-3xl font-bold mb-1 tracking-tighter text-white">99.9%</h2>
             <p className="text-[10px] text-slate-400 font-medium">Network Stable</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Threats</p>
             <h2 className="text-3xl font-bold mb-1 tracking-tighter text-white">{threats.toString().padStart(2, '0')}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Failed Attempts</p>
@@ -177,7 +178,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
         </div>
 
         <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 glass p-6 rounded-3xl min-h-[350px] flex flex-col border border-white/5">
+          <div className="col-span-2 glass p-6 rounded-3xl min-h-87.5 flex flex-col border border-white/5">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-bold text-lg text-white">Traffic Analysis</h3>
                 <span className="text-xs font-medium px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/20">Last 7 Attempts</span>
@@ -226,6 +227,37 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
 }
 
 function SecurityView() {
+  const [pin, setPin] = useState("404");
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleUpdate = async () => {
+    setIsSaving(true);
+    setMessage("");
+    
+    try {
+      const response = await fetch("http://localhost:8000/update_config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_pin: pin })
+      });
+      
+      const data = await response.json();
+      if (data.status === "success") {
+        setMessage("✅ Configuration securely updated & saved to node.");
+      } else {
+        setMessage("❌ Failed to save configuration.");
+      }
+    } catch (err) {
+      setMessage("❌ Communication error with the Brain.");
+    }
+    
+    setIsSaving(false);
+    
+    // Clear message after 3 seconds
+    setTimeout(() => setMessage(""), 3000);
+  };
+
   return (
     <div className="glass p-8 rounded-3xl max-w-3xl">
       <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">Access Control Panel</h2>
@@ -233,22 +265,31 @@ function SecurityView() {
       <div className="space-y-6">
         <div>
           <label className="block text-sm font-medium text-slate-400 mb-2">Node Admin PIN</label>
-          <input type="password" placeholder="***" defaultValue="404" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
-          <p className="text-xs text-slate-500 mt-2">Requires hardware reboot to take effect.</p>
+          <input 
+            type="password" 
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            placeholder="***" 
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" 
+          />
+          <p className="text-xs text-slate-500 mt-2">Live updates immediately. Saved to node NVRAM.</p>
         </div>
 
         <div>
           <label className="block text-sm font-medium text-slate-400 mb-2">Watchdog Timeout (ms)</label>
-          <input type="number" defaultValue="5000" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
+          <input type="number" defaultValue="5000" disabled className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-4 py-3 text-slate-500 cursor-not-allowed font-mono" />
         </div>
 
-        <div className="pt-6 border-t border-slate-800 flex gap-4">
-          <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium transition-colors">
-            <Save size={18} /> Update Configuration
+        <div className="pt-6 border-t border-slate-800 flex items-center gap-4">
+          <button 
+            onClick={handleUpdate}
+            disabled={isSaving}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50"
+          >
+            <Save size={18} /> {isSaving ? "Updating..." : "Update Configuration"}
           </button>
-          <button className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-medium transition-colors">
-            <RefreshCcw size={18} /> Restart Node
-          </button>
+          
+          {message && <span className="text-sm font-medium text-emerald-400 animate-pulse">{message}</span>}
         </div>
 
         <div className="mt-8 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl">

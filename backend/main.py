@@ -120,3 +120,31 @@ def get_analytics():
         "port": PORT,
         "recent_attempts": get_recent_attempts()
     }
+
+from pydantic import BaseModel
+
+# Define what the incoming data looks like
+class ConfigUpdate(BaseModel):
+    new_pin: str
+
+@app.post("/update_config")
+async def update_config(config: ConfigUpdate):
+    global SECRET_CODE
+    
+    # 1. Update the live memory so it works instantly
+    SECRET_CODE = config.new_pin
+    
+    # 2. Rewrite the .env file so it remembers after a reboot
+    try:
+        with open(".env", "r") as f:
+            lines = f.readlines()
+            
+        with open(".env", "w") as f:
+            for line in lines:
+                if line.startswith("SAFE_CODE="):
+                    f.write(f"SAFE_CODE={config.new_pin}\n")
+                else:
+                    f.write(line)
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
