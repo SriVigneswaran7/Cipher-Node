@@ -1,57 +1,113 @@
 #include <Servo.h>
 
-// --- PIN DEFINITIONS ---
-const int BUTTON_CYCLE_PIN = 2; // Button 1 (Top)
-const int BUTTON_ENTER_PIN = 3; // Button 2 (Bottom)
-const int LED_LOCKED_PIN = 8;   // Red LED
-const int LED_UNLOCKED_PIN = 9; // Green LED
-const int SERVO_PIN = 10;       // Servo Motor
+// --- Configuration ---
+const int SECRET_CODE[] = {4, 0, 4}; // The combination
+const int CODE_LENGTH = 3;
 
-Servo lockServo; 
+// --- Pins ---
+const int BTN_CYCLE = 2;
+const int BTN_ENTER = 3;
+const int LED_RED = 8;
+const int LED_GREEN = 9;
+const int SERVO_PIN = 10;
+
+// --- State Variables ---
+Servo lockServo;
+int currentDigit = 0;
+int enteredCode[3];
+int attemptIndex = 0;
+bool isLocked = true;
 
 void setup() {
-  // 1. Start the Serial connection so we can talk to the Mac later
   Serial.begin(9600);
   
-  // 2. Setup LEDs as Outputs
-  pinMode(LED_LOCKED_PIN, OUTPUT);
-  pinMode(LED_UNLOCKED_PIN, OUTPUT);
+  pinMode(BTN_CYCLE, INPUT_PULLUP);
+  pinMode(BTN_ENTER, INPUT_PULLUP);
+  pinMode(LED_RED, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
   
-  // 3. Setup Buttons with internal pull-up resistors! (The Senior Hack)
-  pinMode(BUTTON_CYCLE_PIN, INPUT_PULLUP);
-  pinMode(BUTTON_ENTER_PIN, INPUT_PULLUP);
-  
-  // 4. Attach and calibrate the servo
   lockServo.attach(SERVO_PIN);
-  lockServo.write(0); // Force the motor to absolute zero (Locked state)
+  updateHardware(true); // Start locked
   
-  // 5. Set initial LED state
-  digitalWrite(LED_LOCKED_PIN, HIGH); // Turn Red ON
-  digitalWrite(LED_UNLOCKED_PIN, LOW);  // Turn Green OFF
-  
-  Serial.println("System Booted. Awaiting diagnostics...");
+  // Initial Telemetry
+  Serial.println("{\"event\": \"system_boot\", \"status\": \"ready\"}");
 }
 
 void loop() {
-  // Note: Because we use INPUT_PULLUP, a pressed button reads as LOW.
-  bool cyclePressed = digitalRead(BUTTON_CYCLE_PIN) == LOW;
-  bool enterPressed = digitalRead(BUTTON_ENTER_PIN) == LOW;
-
-  // Test 1: If Button 1 is pressed -> Unlock State
-  if (cyclePressed) {
-    digitalWrite(LED_LOCKED_PIN, LOW);    // Red OFF
-    digitalWrite(LED_UNLOCKED_PIN, HIGH); // Green ON
-    lockServo.write(90);                  // Move Servo to 90 degrees
-    Serial.println("Diagnostics: Unlock Triggered");
-    delay(200); // Tiny debounce delay
+  // Check for Remote Override from Python (Phase 3 Prep)
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    if (cmd == 'U') handleSuccess(); // 'U' for Unlock
+    if (cmd == 'L') updateHardware(true); // 'L' for Lock
   }
 
-  // Test 2: If Button 2 is pressed -> Lock State
-  if (enterPressed) {
-    digitalWrite(LED_LOCKED_PIN, HIGH);   // Red ON
-    digitalWrite(LED_UNLOCKED_PIN, LOW);  // Green OFF
-    lockServo.write(0);                   // Move Servo back to 0 degrees
-    Serial.println("Diagnostics: Lock Triggered");
-    delay(200); // Tiny debounce delay
+  // Physical Button Logic
+  if (digitalRead(BTN_CYCLE) == LOW) {
+    currentDigit = (currentDigit + 1) % 10;
+    
+    // Telemetry: Current selection
+    Serial.print("{\"event\": \"digit_cycle\", \"value\": ");
+    Serial.print(currentDigit);
+    Serial.println("}");
+    
+    delay(250); // Debounce
+  }
+
+  if (digitalRead(BTN_ENTER) == LOW) {
+    enteredCode[attemptIndex] = currentDigit;
+    attemptIndex++;
+
+    Serial.print("{\"event\": \"digit_entry\", \"index\": ");
+    Serial.print(attemptIndex);
+    Serial.println("}");
+
+    if (attemptIndex >= CODE_LENGTH) {
+      checkCode();
+    }
+    
+    currentDigit = 0; // Reset digit for next position
+    delay(250); // Debounce
+  }
+}
+
+void checkCode() {
+  bool match = true;
+  for (int i = 0; i < CODE_LENGTH; i++) {
+    if (enteredCode[i] != SECRET_CODE[i]) match = false;
+  }
+
+  if (match) {
+    handleSuccess();
+  } else {
+    handleFailure();
+  }
+  attemptIndex = 0;
+}
+
+void handleSuccess() {
+  updateHardware(false);
+  Serial.println("{\"event\": \"access_granted\", \"status\": \"unlocked\"}");
+}
+
+void handleFailure() {
+  updateHardware(true);
+  Serial.println("{\"event\": \"access_denied\", \"status\": \"locked\"}");
+  // Flash red to show failure
+  for(int i=0; i<3; i++) {
+    digitalWrite(LED_RED, LOW); delay(100);
+    digitalWrite(LED_RED, HIGH); delay(100);
+  }
+}
+
+void updateHardware(bool locked) {
+  isLocked = locked;
+  if (locked) {
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_GREEN, LOW);
+    lockServo.write(0);
+  } else {
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_GREEN, HIGH);
+    lockServo.write(90);
   }
 }
