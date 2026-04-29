@@ -1,4 +1,4 @@
-@import "tailwindcss"; /* <--- THIS IS THE V4 FIX */
+@import "tailwindcss";
 
 :root {
   background-color: #020617;

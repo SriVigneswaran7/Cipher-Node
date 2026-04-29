@@ -8,8 +8,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
-# NEW: Imported get_recent_logs
 from database import init_db, log_event, log_attempt, get_recent_attempts, get_recent_logs, wipe_db
 
 load_dotenv()
@@ -138,7 +136,7 @@ def get_analytics():
         "port": PORT,
         "uptime_seconds": int(time.time() - START_TIME),
         "recent_attempts": get_recent_attempts(),
-        "recent_logs": get_recent_logs(), # NEW: Send logs to UI
+        "recent_logs": get_recent_logs(),
         "current_config": {
             "pin": SECRET_CODE,
             "timeout": AUTO_LOCK_TIMEOUT
