@@ -35,7 +35,10 @@ The frontend is a React application built with Vite and Tailwind CSS v4, utilisi
 | Security Dashboard | Configuration Panel | Live Terminal |
 | :---: | :---: | :---: |
 | ![Dashboard](assets/Dashboard.png) | ![Security](assets/Security.png) | ![Logs](assets/Logs.png) |
-| **Real-Time Analytics:** Displays live hardware input sequencing, visualises the last 7 access attempts via Recharts, and features a live System Event Ledger pulling directly from SQLite. | **Node Settings:** Allows administrators to dynamically rewrite the backend `.env` configuration (PIN and timeouts) on the fly, and includes a secure interface to purge the audit database. | **Telemetry Stream:** A dedicated terminal interface streaming raw JSON packets directly from the hardware and backend. Includes interactive filters to isolate hardware, system, or security events, plus CSV export functionality. |
+
+* **Real-Time Analytics:** Displays live hardware input sequencing, visualises the last 7 access attempts via Recharts, and features a live System Event Ledger pulling directly from SQLite.
+* **Node Settings:** Allows administrators to dynamically rewrite the backend `.env` configuration (PIN and timeouts) on the fly, and includes a secure interface to purge the audit database.
+* **Telemetry Stream:** A dedicated terminal interface streaming raw JSON packets directly from the hardware and backend. Includes interactive filters to isolate hardware, system, or security events, plus CSV export functionality. |
 
 ---
 
