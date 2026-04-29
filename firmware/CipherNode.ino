@@ -33,17 +33,17 @@ void setup() {
 void loop() {
   unsigned long currentTime = millis();
 
-  // 1. Watchdog Timer:
+  // 1. Watchdog Timer
   if (!isLocked && (currentTime - lastHeartbeat > WATCHDOG_TIMEOUT)) {
     executeLock();
     Serial.println("{\"event\": \"watchdog_trigger\", \"reason\": \"heartbeat_lost\"}");
   }
 
-  // 2. Input Relay: Every click is sent to the Mac as JSON.
+  // 2. Input Relay
   checkButton(BTN_1, "btn_1");
   checkButton(BTN_2, "btn_2");
 
-  // 3. Command Parser: Listen for the Brain
+  // 3. Command Parser
   if (Serial.available() > 0) {
     char cmd = Serial.read();
     
@@ -62,10 +62,10 @@ void loop() {
   }
 }
 
-// Relays physical presses to Python and provides a tiny "tactile" blink
+// Relays physical presses to Python with simple JSON events
 void checkButton(int pin, String label) {
   if (digitalRead(pin) == LOW) {
-    // Local Feedback: Flicker the Red LED so the user knows it registered
+    // Local Feedback
     digitalWrite(LED_RED, LOW); 
     delay(20); 
     digitalWrite(LED_RED, isLocked ? HIGH : LOW);

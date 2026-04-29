@@ -52,7 +52,7 @@ def get_recent_attempts():
         
     return formatted_data
 
-# NEW: Fetch recent raw events for the Dashboard Ledger
+# Fetch recent raw events for the Dashboard Ledger
 def get_recent_logs(limit=6):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()

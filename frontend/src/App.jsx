@@ -150,28 +150,28 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
     <>
       <div className="grid grid-cols-4 gap-6 mb-8">
           <div className={`glass p-6 rounded-3xl relative overflow-hidden group ${status === "LOCKED_OUT" ? "border-rose-500/50 bg-rose-500/10" : ""}`}>
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
             <p className="text-indigo-300 text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-2">Live Input <Activity size={12}/></p>
             <h2 className={`text-4xl font-mono font-bold mb-1 tracking-widest h-10 ${status === "LOCKED_OUT" ? "text-rose-400" : "text-white"}`}>{status === "LOCKED_OUT" ? `WAIT ${lockoutTimer}s` : (currentAttempt || "---")}</h2>
             <p className="text-[10px] text-slate-400 font-medium">{status === "LOCKED_OUT" ? "Hardware frozen." : (currentAttempt ? "Sequencing..." : "Awaiting input")}</p>
           </div>
 
           <div className={`glass p-6 rounded-3xl relative overflow-hidden transition-all duration-500 ${status === "UNLOCKED" ? "border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]" : status === "LOCKED_OUT" ? "border-rose-500/50 shadow-[0_0_30px_rgba(244,63,94,0.2)] bg-rose-500/5" : ""}`}>
-            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-gradient-to-br from-fuchsia-500 to-rose-500"}`}></div>
+            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-linear-to-br from-fuchsia-500 to-rose-500"}`}></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Status</p>
             <h2 className={`text-3xl font-bold mb-1 tracking-tighter ${status === "UNLOCKED" ? "text-emerald-400" : "text-rose-400"}`}>{status.replace('_', ' ')}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Hardware Relay</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Node Uptime</p>
             <h2 className="text-2xl font-bold mb-1 tracking-tight text-white font-mono">{uptimeStr}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Session Active</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Threats</p>
             <h2 className="text-3xl font-bold mb-1 tracking-tighter text-white">{threats.toString().padStart(2, '0')}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Failed Attempts</p>
@@ -179,7 +179,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
         </div>
 
         <div className="grid grid-cols-3 gap-6 mb-6">
-          <div className="col-span-2 glass p-6 rounded-3xl min-h-[350px] flex flex-col border border-white/5">
+          <div className="col-span-2 glass p-6 rounded-3xl min-h-87.5 flex flex-col border border-white/5">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-bold text-lg text-white">Traffic Analysis</h3>
                 <span className="text-xs font-medium px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/20">Last 7 Attempts</span>
@@ -276,12 +276,12 @@ function SecurityView({ configParams, fetchAnalytics, addLog }) {
       });
       const data = await response.json();
       if (data.status === "success") {
-        setMessage("✅ Configuration securely updated.");
+        setMessage("Configuration securely updated.");
         fetchAnalytics();
       } else {
-        setMessage("❌ Failed to save configuration.");
+        setMessage("Failed to save configuration.");
       }
-    } catch (err) { setMessage("❌ Communication error with the Brain."); }
+    } catch (err) { setMessage("Communication error with the Brain."); }
     setIsSaving(false);
     setTimeout(() => setMessage(""), 3000);
   };
@@ -290,12 +290,12 @@ function SecurityView({ configParams, fetchAnalytics, addLog }) {
     try {
       const res = await fetch("http://localhost:8000/wipe_logs", { method: "DELETE" });
       if (res.ok) {
-        setWipeMessage("✅ Database purged.");
+        setWipeMessage("Database purged.");
         fetchAnalytics();
         addLog("SYSTEM: Admin initiated database purge.");
         setTimeout(() => setWipeMessage(""), 3000);
       }
-    } catch (e) { setWipeMessage("❌ Purge failed."); }
+    } catch (e) { setWipeMessage("Purge failed."); }
   };
 
   return (
@@ -340,7 +340,7 @@ function SecurityView({ configParams, fetchAnalytics, addLog }) {
 
       {/* Danger Zone Column */}
       <div className="col-span-2 flex flex-col gap-8">
-        <div className="glass p-10 rounded-3xl border border-rose-500/20 bg-gradient-to-b from-rose-500/5 to-transparent flex flex-col h-full relative overflow-hidden">
+        <div className="glass p-10 rounded-3xl border border-rose-500/20 bg-linear-to-b from-rose-500/5 to-transparent flex flex-col h-full relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 blur-[80px] pointer-events-none"></div>
             
             <div className="flex items-center gap-3 mb-6">
