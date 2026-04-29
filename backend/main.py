@@ -8,7 +8,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from database import init_db, log_event, log_attempt, get_recent_attempts, wipe_db
+
+# NEW: Imported get_recent_logs
+from database import init_db, log_event, log_attempt, get_recent_attempts, get_recent_logs, wipe_db
 
 load_dotenv()
 init_db()
@@ -22,7 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- AUTO PORT DISCOVERY ---
 def find_arduino_port():
     ports = serial.tools.list_ports.comports()
     for port in ports:
@@ -39,7 +40,6 @@ ser = None
 connected_clients = set()
 START_TIME = time.time()
 
-# --- SECURITY STATE VARIABLES ---
 current_attempt = ""
 current_digit = 0 
 failed_attempts = 0
@@ -65,9 +65,8 @@ async def serial_reader():
                 data = json.loads(line)
                 
                 if data.get("event") == "btn_press":
-                    # Check for Brute-Force Lockout
                     if time.time() < lockout_until:
-                        continue # Ignore inputs completely while in timeout
+                        continue 
                         
                     log_event("button_press", data["id"])
                     
@@ -83,7 +82,7 @@ async def serial_reader():
                         
                         if len(current_attempt) == 3:
                             if current_attempt == SECRET_CODE:
-                                failed_attempts = 0 # Reset strikes
+                                failed_attempts = 0
                                 ser.write(b'U')
                                 log_attempt(current_attempt, "SUCCESS")
                                 await broadcast({"type": "AUTH_RESULT", "status": "SUCCESS"})
@@ -99,7 +98,6 @@ async def serial_reader():
                                 failed_attempts += 1
                                 log_attempt(current_attempt, "DENIED")
                                 
-                                # Brute Force Trigger (3 Strikes)
                                 if failed_attempts >= 3:
                                     lockout_until = time.time() + 60
                                     log_event("SYSTEM_LOCKOUT", "3 consecutive failed attempts.")
@@ -140,6 +138,7 @@ def get_analytics():
         "port": PORT,
         "uptime_seconds": int(time.time() - START_TIME),
         "recent_attempts": get_recent_attempts(),
+        "recent_logs": get_recent_logs(), # NEW: Send logs to UI
         "current_config": {
             "pin": SECRET_CODE,
             "timeout": AUTO_LOCK_TIMEOUT
@@ -169,7 +168,6 @@ async def update_config(config: ConfigUpdate):
                 elif not line.startswith("SERIAL_PORT") and not line.startswith("BAUD_RATE"):
                     f.write(line)
             
-            # Ensure they exist if not already in the file
             if not any(l.startswith("SAFE_CODE=") for l in lines):
                 f.write(f"SAFE_CODE={config.new_pin}\n")
             if not any(l.startswith("AUTO_LOCK=") for l in lines):
