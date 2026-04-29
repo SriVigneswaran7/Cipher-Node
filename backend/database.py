@@ -51,3 +51,12 @@ def get_recent_attempts():
         formatted_data.append({"time": time_string, "status": row[1]})
         
     return formatted_data
+
+# NEW: Purge function for the Security Dashboard
+def wipe_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM logs")
+    c.execute("DELETE FROM attempts")
+    conn.commit()
+    conn.close()

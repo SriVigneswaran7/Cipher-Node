@@ -1,4 +1,4 @@
-# CIPHER_NODE
+# Cipher-Node
 
 ![React](https://img.shields.io/badge/React-Frontend-blue)
 ![Tailwind](https://img.shields.io/badge/TailwindCSS-Styling-06B6D4)

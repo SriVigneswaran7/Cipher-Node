@@ -1,11 +1,14 @@
 import asyncio
 import serial
+import serial.tools.list_ports
 import json
 import os
+import time
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from dotenv import load_dotenv
-from database import init_db, log_event, log_attempt, get_recent_attempts
+from database import init_db, log_event, log_attempt, get_recent_attempts, wipe_db
 
 load_dotenv()
 init_db()
@@ -19,31 +22,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PORT = os.getenv("SERIAL_PORT", "/dev/cu.usbmodem1101")
+# --- AUTO PORT DISCOVERY ---
+def find_arduino_port():
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        if "usbmodem" in port.device or "CH340" in port.description or "Arduino" in port.description:
+            return port.device
+    return os.getenv("SERIAL_PORT", "/dev/cu.usbmodem1101")
+
+PORT = find_arduino_port()
 BAUD = int(os.getenv("BAUD_RATE", 9600))
 SECRET_CODE = os.getenv("SAFE_CODE", "404")
+AUTO_LOCK_TIMEOUT = int(os.getenv("AUTO_LOCK", 5000))
 
 ser = None
 connected_clients = set()
+START_TIME = time.time()
 
-# State variables for hardware logic
+# --- SECURITY STATE VARIABLES ---
 current_attempt = ""
 current_digit = 0 
+failed_attempts = 0
+lockout_until = 0
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=0.1)
+    print(f"✅ Hardware linked on {PORT}")
 except Exception as e:
-    print(f"⚠️ SERIAL ERROR: {e}. Dashboard will run in simulation mode.")
+    print(f"⚠️ SERIAL ERROR: Dashboard running in simulation mode.")
 
 async def broadcast(message: dict):
-    """Pushes real-time JSON data to the React frontend"""
     if connected_clients:
         data = json.dumps(message)
         await asyncio.gather(*[client.send_text(data) for client in connected_clients])
 
 async def serial_reader():
-    """Parses JSON from Arduino and applies Cycle/Enter logic"""
-    global current_attempt, current_digit, ser
+    global current_attempt, current_digit, failed_attempts, lockout_until, ser
     while True:
         if ser and ser.in_waiting > 0:
             try:
@@ -51,47 +65,54 @@ async def serial_reader():
                 data = json.loads(line)
                 
                 if data.get("event") == "btn_press":
+                    # Check for Brute-Force Lockout
+                    if time.time() < lockout_until:
+                        continue # Ignore inputs completely while in timeout
+                        
                     log_event("button_press", data["id"])
                     
-                    # Cycle Button
                     if data["id"] == "btn_1":
                         current_digit = (current_digit + 1) % 10
                         preview = current_attempt + str(current_digit) + "_"
                         await broadcast({"type": "LIVE_PREVIEW", "current": preview})
                     
-                    # Enter Button
                     elif data["id"] == "btn_2":
                         current_attempt += str(current_digit)
                         current_digit = 0 
                         await broadcast({"type": "LIVE_PREVIEW", "current": current_attempt})
                         
-                        # Validate Password at 3 Digits
                         if len(current_attempt) == 3:
                             if current_attempt == SECRET_CODE:
+                                failed_attempts = 0 # Reset strikes
                                 ser.write(b'U')
                                 log_attempt(current_attempt, "SUCCESS")
                                 await broadcast({"type": "AUTH_RESULT", "status": "SUCCESS"})
                                 
-                                # NEW: The True Hardware Auto-Lock
                                 async def auto_lock():
-                                    await asyncio.sleep(5) # Wait 5 seconds
+                                    await asyncio.sleep(AUTO_LOCK_TIMEOUT / 1000.0) 
                                     if ser:
-                                        ser.write(b'L') # Physically lock the Arduino
-                                    await broadcast({"type": "AUTH_RESULT", "status": "LOCKED"}) # Tell React
+                                        ser.write(b'L')
+                                    await broadcast({"type": "AUTH_RESULT", "status": "LOCKED"})
                                     
                                 asyncio.create_task(auto_lock())
-
                             else:
+                                failed_attempts += 1
                                 log_attempt(current_attempt, "DENIED")
-                                await broadcast({"type": "AUTH_RESULT", "status": "DENIED"})
+                                
+                                # Brute Force Trigger (3 Strikes)
+                                if failed_attempts >= 3:
+                                    lockout_until = time.time() + 60
+                                    log_event("SYSTEM_LOCKOUT", "3 consecutive failed attempts.")
+                                    await broadcast({"type": "SYSTEM_LOCKOUT", "duration": 60})
+                                else:
+                                    await broadcast({"type": "AUTH_RESULT", "status": "DENIED"})
                             
-                            current_attempt = "" # Reset
+                            current_attempt = ""
             except json.JSONDecodeError:
-                pass # Ignore malformed serial noise
+                pass 
         await asyncio.sleep(0.01)
 
 async def watchdog_pinger():
-    """Satisfies the Arduino Deadman Switch by pinging every 2 seconds"""
     while True:
         if ser:
             ser.write(b'P')
@@ -114,27 +135,27 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/analytics")
 def get_analytics():
-    """REST endpoint for React to fetch historical chart data"""
     return {
         "status": "online", 
         "port": PORT,
-        "recent_attempts": get_recent_attempts()
+        "uptime_seconds": int(time.time() - START_TIME),
+        "recent_attempts": get_recent_attempts(),
+        "current_config": {
+            "pin": SECRET_CODE,
+            "timeout": AUTO_LOCK_TIMEOUT
+        }
     }
 
-from pydantic import BaseModel
-
-# Define what the incoming data looks like
 class ConfigUpdate(BaseModel):
     new_pin: str
+    timeout: int
 
 @app.post("/update_config")
 async def update_config(config: ConfigUpdate):
-    global SECRET_CODE
-    
-    # 1. Update the live memory so it works instantly
+    global SECRET_CODE, AUTO_LOCK_TIMEOUT
     SECRET_CODE = config.new_pin
+    AUTO_LOCK_TIMEOUT = config.timeout
     
-    # 2. Rewrite the .env file so it remembers after a reboot
     try:
         with open(".env", "r") as f:
             lines = f.readlines()
@@ -143,8 +164,25 @@ async def update_config(config: ConfigUpdate):
             for line in lines:
                 if line.startswith("SAFE_CODE="):
                     f.write(f"SAFE_CODE={config.new_pin}\n")
-                else:
+                elif line.startswith("AUTO_LOCK="):
+                    f.write(f"AUTO_LOCK={config.timeout}\n")
+                elif not line.startswith("SERIAL_PORT") and not line.startswith("BAUD_RATE"):
                     f.write(line)
+            
+            # Ensure they exist if not already in the file
+            if not any(l.startswith("SAFE_CODE=") for l in lines):
+                f.write(f"SAFE_CODE={config.new_pin}\n")
+            if not any(l.startswith("AUTO_LOCK=") for l in lines):
+                f.write(f"AUTO_LOCK={config.timeout}\n")
+                
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.delete("/wipe_logs")
+async def wipe_logs_endpoint():
+    try:
+        wipe_db()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error"}

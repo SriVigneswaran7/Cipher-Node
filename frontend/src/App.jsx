@@ -3,23 +3,25 @@ import { Shield, Activity, Lock, Terminal, Settings, Save, AlertTriangle, Refres
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function App() {
-  // Navigation State
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  // Hardware/Backend State
   const [currentAttempt, setCurrentAttempt] = useState("");
   const [status, setStatus] = useState("LOCKED");
   const [connected, setConnected] = useState(false);
   const [chartData, setChartData] = useState([]);
   const [threats, setThreats] = useState(0);
   
-  // Live Logs State
+  // New State variables
+  const [uptimeStr, setUptimeStr] = useState("00h 00m 00s");
+  const [configParams, setConfigParams] = useState({ pin: "404", timeout: 5000 });
+  const [lockoutTimer, setLockoutTimer] = useState(0);
+  
   const [liveLogs, setLiveLogs] = useState([
     `[${new Date().toLocaleTimeString()}] SYSTEM: Initializing UI interface...`
   ]);
 
   const addLog = (message) => {
-    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-50)); // Keep last 50 logs
+    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-50));
   };
 
   const fetchAnalytics = async () => {
@@ -27,26 +29,29 @@ export default function App() {
       const res = await fetch('http://localhost:8000/analytics');
       const data = await res.json();
       setChartData(data.recent_attempts || []);
-      const deniedCount = data.recent_attempts.filter(a => a.status === 'DENIED').length;
-      setThreats(deniedCount);
+      setThreats(data.recent_attempts.filter(a => a.status === 'DENIED').length);
+      setConfigParams(data.current_config);
+      
+      // Format Live Uptime
+      const hours = Math.floor(data.uptime_seconds / 3600);
+      const minutes = Math.floor((data.uptime_seconds % 3600) / 60);
+      const seconds = data.uptime_seconds % 60;
+      setUptimeStr(`${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`);
     } catch (err) {}
   };
 
   useEffect(() => {
     fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 5000);
+    const interval = setInterval(fetchAnalytics, 1000); // Poll every second for the clock
 
     const ws = new WebSocket('ws://localhost:8000/ws');
 
     ws.onopen = () => {
       setConnected(true);
-      addLog("SOCKET: Connected to Brain (ws://localhost:8000/ws)");
+      addLog("SOCKET: Connected to Brain.");
     };
     
-    ws.onclose = () => {
-      setConnected(false);
-      addLog("SOCKET: Connection lost. Reconnecting...");
-    };
+    ws.onclose = () => setConnected(false);
 
     ws.onmessage = (event) => {
       const rawData = event.data;
@@ -57,15 +62,13 @@ export default function App() {
       if (data.type === "LIVE_PREVIEW") {
         setCurrentAttempt(data.current);
       } else if (data.type === "AUTH_RESULT") {
-        // Now it strictly obeys the Brain (SUCCESS = UNLOCKED, anything else = LOCKED)
         setStatus(data.status === "SUCCESS" ? "UNLOCKED" : "LOCKED");
+        if (data.status === "LOCKED") setCurrentAttempt("");
         fetchAnalytics(); 
-        
-        // Clean up the UI when the Brain tells us it locked
-        if (data.status === "LOCKED") {
-          setCurrentAttempt("");
-          addLog("SYSTEM: Hardware secured and locked.");
-        }
+      } else if (data.type === "SYSTEM_LOCKOUT") {
+        setStatus("LOCKED_OUT");
+        setLockoutTimer(data.duration);
+        setCurrentAttempt("BLK");
       }
     };
 
@@ -75,10 +78,19 @@ export default function App() {
     };
   }, []);
 
+  // Handle local countdown for the lockout
+  useEffect(() => {
+    if (lockoutTimer > 0) {
+      const timer = setTimeout(() => setLockoutTimer(lockoutTimer - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (status === "LOCKED_OUT" && lockoutTimer === 0) {
+      setStatus("LOCKED");
+      setCurrentAttempt("");
+    }
+  }, [lockoutTimer, status]);
+
   return (
     <div className="flex h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans">
-      
-      {/* SIDEBAR */}
       <aside className="w-64 border-r border-slate-800/50 bg-slate-900/20 flex flex-col p-6 z-20">
         <div className="flex items-center gap-3 mb-10 text-indigo-500 font-bold text-xl">
           <Shield size={32} />
@@ -91,13 +103,10 @@ export default function App() {
         </nav>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 overflow-y-auto p-8 relative">
-        {/* Background Ambient Glows */}
         <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none"></div>
         <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-fuchsia-600/10 rounded-full blur-[120px] pointer-events-none"></div>
 
-        {/* Global Header */}
         <header className="flex justify-between items-center mb-10 relative z-10">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-white mb-1">
@@ -116,10 +125,9 @@ export default function App() {
           </div>
         </header>
 
-        {/* --- PAGE RENDERING LOGIC --- */}
         <div className="relative z-10 h-full">
-          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} />}
-          {activeTab === 'security' && <SecurityView />}
+          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} uptimeStr={uptimeStr} lockoutTimer={lockoutTimer} configParams={configParams} />}
+          {activeTab === 'security' && <SecurityView configParams={configParams} fetchAnalytics={fetchAnalytics} addLog={addLog} />}
           {activeTab === 'logs' && <LogsView logs={liveLogs} />}
         </div>
       </main>
@@ -127,50 +135,40 @@ export default function App() {
   );
 }
 
-// --- SUB-COMPONENTS & PAGES ---
-
 function SidebarItem({ icon, label, active, onClick }) {
   if (active) {
-    return (
-      <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(79,70,229,0.1)] cursor-pointer">
-        {icon} <span className="font-medium">{label}</span>
-      </div>
-    );
+    return <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(79,70,229,0.1)] cursor-pointer">{icon} <span className="font-medium">{label}</span></div>;
   }
-  return (
-    <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all cursor-pointer">
-      {icon} <span className="font-medium">{label}</span>
-    </div>
-  );
+  return <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all cursor-pointer">{icon} <span className="font-medium">{label}</span></div>;
 }
 
-function DashboardView({ currentAttempt, status, threats, chartData, connected }) {
+function DashboardView({ currentAttempt, status, threats, chartData, connected, uptimeStr, lockoutTimer, configParams }) {
   return (
     <>
       <div className="grid grid-cols-4 gap-6 mb-8">
-          <div className="glass p-6 rounded-3xl relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
+          <div className={`glass p-6 rounded-3xl relative overflow-hidden group ${status === "LOCKED_OUT" ? "border-rose-500/50 bg-rose-500/10" : ""}`}>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-indigo-500 to-blue-500 blur-3xl opacity-20"></div>
             <p className="text-indigo-300 text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-2">Live Input <Activity size={12}/></p>
-            <h2 className="text-4xl font-mono font-bold mb-1 tracking-widest text-white h-10">{currentAttempt || "---"}</h2>
-            <p className="text-[10px] text-slate-400 font-medium">{currentAttempt ? "Sequencing..." : "Awaiting input"}</p>
+            <h2 className={`text-4xl font-mono font-bold mb-1 tracking-widest h-10 ${status === "LOCKED_OUT" ? "text-rose-400" : "text-white"}`}>{status === "LOCKED_OUT" ? `WAIT ${lockoutTimer}s` : (currentAttempt || "---")}</h2>
+            <p className="text-[10px] text-slate-400 font-medium">{status === "LOCKED_OUT" ? "Hardware frozen." : (currentAttempt ? "Sequencing..." : "Awaiting input")}</p>
           </div>
 
-          <div className={`glass p-6 rounded-3xl relative overflow-hidden transition-all duration-500 ${status === "UNLOCKED" ? "border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]" : ""}`}>
-            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-linear-to-br from-fuchsia-500 to-rose-500"}`}></div>
+          <div className={`glass p-6 rounded-3xl relative overflow-hidden transition-all duration-500 ${status === "UNLOCKED" ? "border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]" : status === "LOCKED_OUT" ? "border-rose-500/50 shadow-[0_0_30px_rgba(244,63,94,0.2)] bg-rose-500/5" : ""}`}>
+            <div className={`absolute top-0 right-0 w-24 h-24 blur-3xl opacity-20 ${status === "UNLOCKED" ? "bg-emerald-500" : "bg-gradient-to-br from-fuchsia-500 to-rose-500"}`}></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Status</p>
-            <h2 className={`text-3xl font-bold mb-1 tracking-tighter ${status === "UNLOCKED" ? "text-emerald-400" : "text-rose-400"}`}>{status}</h2>
+            <h2 className={`text-3xl font-bold mb-1 tracking-tighter ${status === "UNLOCKED" ? "text-emerald-400" : "text-rose-400"}`}>{status.replace('_', ' ')}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Hardware Relay</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Uptime</p>
-            <h2 className="text-3xl font-bold mb-1 tracking-tighter text-white">99.9%</h2>
-            <p className="text-[10px] text-slate-400 font-medium">Network Stable</p>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-blue-500 to-cyan-500 blur-3xl opacity-10"></div>
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Node Uptime</p>
+            <h2 className="text-2xl font-bold mb-1 tracking-tight text-white font-mono">{uptimeStr}</h2>
+            <p className="text-[10px] text-slate-400 font-medium">Session Active</p>
           </div>
 
           <div className="glass p-6 rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-linear-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
+            <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-500 to-orange-500 blur-3xl opacity-10"></div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Threats</p>
             <h2 className="text-3xl font-bold mb-1 tracking-tighter text-white">{threats.toString().padStart(2, '0')}</h2>
             <p className="text-[10px] text-slate-400 font-medium">Failed Attempts</p>
@@ -178,7 +176,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
         </div>
 
         <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 glass p-6 rounded-3xl min-h-87.5 flex flex-col border border-white/5">
+          <div className="col-span-2 glass p-6 rounded-3xl min-h-[350px] flex flex-col border border-white/5">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-bold text-lg text-white">Traffic Analysis</h3>
                 <span className="text-xs font-medium px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full border border-indigo-500/20">Last 7 Attempts</span>
@@ -211,7 +209,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
             </div>
             <div className="space-y-5 text-sm flex-1">
                 <div className="flex justify-between items-center pb-3 border-b border-slate-800/50"><span className="text-slate-400">Watchdog Timer</span><span className="font-mono text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded text-xs">ACTIVE</span></div>
-                <div className="flex justify-between items-center pb-3 border-b border-slate-800/50"><span className="text-slate-400">Auto-Lock</span><span className="font-mono text-indigo-300">5000ms</span></div>
+                <div className="flex justify-between items-center pb-3 border-b border-slate-800/50"><span className="text-slate-400">Auto-Lock</span><span className="font-mono text-indigo-300">{configParams.timeout}ms</span></div>
                 <div className="flex justify-between items-center pb-3 border-b border-slate-800/50"><span className="text-slate-400">Baud Rate</span><span className="font-mono text-slate-300">9600</span></div>
                 <div className="flex justify-between items-center pb-3 border-b border-slate-800/50"><span className="text-slate-400">Protocol</span><span className="font-mono text-slate-300">JSON/Serial</span></div>
             </div>
@@ -226,80 +224,74 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected }
   )
 }
 
-function SecurityView() {
-  const [pin, setPin] = useState("404");
+function SecurityView({ configParams, fetchAnalytics, addLog }) {
+  const [pin, setPin] = useState(configParams.pin);
+  const [timeout, setTimeoutVal] = useState(configParams.timeout);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [wipeMessage, setWipeMessage] = useState("");
 
   const handleUpdate = async () => {
     setIsSaving(true);
     setMessage("");
-    
     try {
       const response = await fetch("http://localhost:8000/update_config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_pin: pin })
+        body: JSON.stringify({ new_pin: pin, timeout: parseInt(timeout) })
       });
-      
       const data = await response.json();
       if (data.status === "success") {
-        setMessage("✅ Configuration securely updated & saved to node.");
+        setMessage("✅ Configuration securely updated.");
+        fetchAnalytics();
       } else {
         setMessage("❌ Failed to save configuration.");
       }
-    } catch (err) {
-      setMessage("❌ Communication error with the Brain.");
-    }
-    
+    } catch (err) { setMessage("❌ Communication error with the Brain."); }
     setIsSaving(false);
-    
-    // Clear message after 3 seconds
     setTimeout(() => setMessage(""), 3000);
+  };
+
+  const handleWipe = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/wipe_logs", { method: "DELETE" });
+      if (res.ok) {
+        setWipeMessage("✅ Database purged.");
+        fetchAnalytics();
+        addLog("SYSTEM: Admin initiated database purge.");
+        setTimeout(() => setWipeMessage(""), 3000);
+      }
+    } catch (e) { setWipeMessage("❌ Purge failed."); }
   };
 
   return (
     <div className="glass p-8 rounded-3xl max-w-3xl">
       <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">Access Control Panel</h2>
-      
       <div className="space-y-6">
         <div>
           <label className="block text-sm font-medium text-slate-400 mb-2">Node Admin PIN</label>
-          <input 
-            type="password" 
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder="***" 
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" 
-          />
+          <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
           <p className="text-xs text-slate-500 mt-2">Live updates immediately. Saved to node NVRAM.</p>
         </div>
-
         <div>
-          <label className="block text-sm font-medium text-slate-400 mb-2">Watchdog Timeout (ms)</label>
-          <input type="number" defaultValue="5000" disabled className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-4 py-3 text-slate-500 cursor-not-allowed font-mono" />
+          <label className="block text-sm font-medium text-slate-400 mb-2">Auto-Lock Timeout (ms)</label>
+          <input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
+          <p className="text-xs text-slate-500 mt-2">How long the physical relay remains open before auto-securing.</p>
         </div>
-
         <div className="pt-6 border-t border-slate-800 flex items-center gap-4">
-          <button 
-            onClick={handleUpdate}
-            disabled={isSaving}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50"
-          >
+          <button onClick={handleUpdate} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50">
             <Save size={18} /> {isSaving ? "Updating..." : "Update Configuration"}
           </button>
-          
           {message && <span className="text-sm font-medium text-emerald-400 animate-pulse">{message}</span>}
         </div>
-
-        <div className="mt-8 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl">
-          <div className="flex items-center gap-3 text-rose-400 font-bold mb-2">
-            <AlertTriangle size={20} /> Danger Zone
+        <div className="mt-8 p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
+          <div className="flex items-center gap-3 text-rose-400 font-bold mb-2"><AlertTriangle size={20} /> Danger Zone</div>
+          <p className="text-sm text-rose-400/80 mb-5">Wiping the audit database will permanently delete all threat logs and traffic analysis history. This action cannot be reversed.</p>
+          <div className="flex items-center gap-4">
+            <button onClick={handleWipe} className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-lg shadow-rose-500/20">Purge SQLite Database</button>
+            {wipeMessage && <span className="text-sm font-bold text-rose-400">{wipeMessage}</span>}
           </div>
-          <p className="text-sm text-rose-400/80 mb-4">Wiping the audit database will permanently delete all threat logs and traffic analysis history.</p>
-          <button className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
-            Wipe Database
-          </button>
         </div>
       </div>
     </div>
@@ -308,12 +300,8 @@ function SecurityView() {
 
 function LogsView({ logs }) {
   const scrollRef = useRef(null);
-
-  // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [logs]);
 
   return (
@@ -329,7 +317,6 @@ function LogsView({ logs }) {
           <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
         </div>
       </div>
-      
       <div className="flex-1 bg-black/60 p-6 overflow-y-auto font-mono text-sm leading-relaxed" ref={scrollRef}>
         {logs.length === 0 ? (
           <span className="text-slate-600">Awaiting data stream...</span>
@@ -337,7 +324,7 @@ function LogsView({ logs }) {
           logs.map((log, index) => (
             <div key={index} className="mb-1">
               <span className="text-slate-500">{log.substring(0, 13)}</span>
-              <span className={`${log.includes('RECV:') ? 'text-indigo-400' : log.includes('SUCCESS') ? 'text-emerald-400' : log.includes('DENIED') ? 'text-rose-400' : 'text-slate-300'}`}>
+              <span className={`${log.includes('RECV:') ? 'text-indigo-400' : log.includes('SUCCESS') ? 'text-emerald-400' : log.includes('DENIED') || log.includes('LOCKOUT') ? 'text-rose-400' : 'text-slate-300'}`}>
                 {log.substring(13)}
               </span>
             </div>
