@@ -45,9 +45,9 @@ lockout_until = 0
 
 try:
     ser = serial.Serial(PORT, BAUD, timeout=0.1)
-    print(f"✅ Hardware linked on {PORT}")
+    print(f"Hardware linked on {PORT}")
 except Exception as e:
-    print(f"⚠️ SERIAL ERROR: Dashboard running in simulation mode.")
+    print(f"SERIAL ERROR: Dashboard running in simulation mode.")
 
 async def broadcast(message: dict):
     if connected_clients:
