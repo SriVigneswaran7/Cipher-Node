@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Activity, Lock, Terminal, Settings, Save, AlertTriangle, RefreshCcw } from 'lucide-react';
+import { Shield, Activity, Lock, Terminal, Settings, Save, AlertTriangle, ListFilter, Download } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function App() {
@@ -9,9 +9,9 @@ export default function App() {
   const [status, setStatus] = useState("LOCKED");
   const [connected, setConnected] = useState(false);
   const [chartData, setChartData] = useState([]);
+  const [recentLogsData, setRecentLogsData] = useState([]); // NEW: Event Ledger State
   const [threats, setThreats] = useState(0);
   
-  // New State variables
   const [uptimeStr, setUptimeStr] = useState("00h 00m 00s");
   const [configParams, setConfigParams] = useState({ pin: "404", timeout: 5000 });
   const [lockoutTimer, setLockoutTimer] = useState(0);
@@ -21,7 +21,7 @@ export default function App() {
   ]);
 
   const addLog = (message) => {
-    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-50));
+    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-100)); // Increased scroll buffer
   };
 
   const fetchAnalytics = async () => {
@@ -29,10 +29,10 @@ export default function App() {
       const res = await fetch('http://localhost:8000/analytics');
       const data = await res.json();
       setChartData(data.recent_attempts || []);
+      setRecentLogsData(data.recent_logs || []); // NEW: Populate Ledger
       setThreats(data.recent_attempts.filter(a => a.status === 'DENIED').length);
       setConfigParams(data.current_config);
       
-      // Format Live Uptime
       const hours = Math.floor(data.uptime_seconds / 3600);
       const minutes = Math.floor((data.uptime_seconds % 3600) / 60);
       const seconds = data.uptime_seconds % 60;
@@ -42,13 +42,13 @@ export default function App() {
 
   useEffect(() => {
     fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 1000); // Poll every second for the clock
+    const interval = setInterval(fetchAnalytics, 1000);
 
     const ws = new WebSocket('ws://localhost:8000/ws');
 
     ws.onopen = () => {
       setConnected(true);
-      addLog("SOCKET: Connected to Brain.");
+      addLog("SYSTEM: Connected to Logic Brain.");
     };
     
     ws.onclose = () => setConnected(false);
@@ -63,12 +63,16 @@ export default function App() {
         setCurrentAttempt(data.current);
       } else if (data.type === "AUTH_RESULT") {
         setStatus(data.status === "SUCCESS" ? "UNLOCKED" : "LOCKED");
+        if (data.status === "SUCCESS") {
+            addLog("SUCCESS: Node Unlocked.");
+        }
         if (data.status === "LOCKED") setCurrentAttempt("");
         fetchAnalytics(); 
       } else if (data.type === "SYSTEM_LOCKOUT") {
         setStatus("LOCKED_OUT");
         setLockoutTimer(data.duration);
         setCurrentAttempt("BLK");
+        addLog(`LOCKOUT: Threat detected. Node frozen for ${data.duration}s.`);
       }
     };
 
@@ -78,7 +82,6 @@ export default function App() {
     };
   }, []);
 
-  // Handle local countdown for the lockout
   useEffect(() => {
     if (lockoutTimer > 0) {
       const timer = setTimeout(() => setLockoutTimer(lockoutTimer - 1), 1000);
@@ -126,7 +129,7 @@ export default function App() {
         </header>
 
         <div className="relative z-10 h-full">
-          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} uptimeStr={uptimeStr} lockoutTimer={lockoutTimer} configParams={configParams} />}
+          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} uptimeStr={uptimeStr} lockoutTimer={lockoutTimer} configParams={configParams} recentLogsData={recentLogsData} />}
           {activeTab === 'security' && <SecurityView configParams={configParams} fetchAnalytics={fetchAnalytics} addLog={addLog} />}
           {activeTab === 'logs' && <LogsView logs={liveLogs} />}
         </div>
@@ -142,7 +145,7 @@ function SidebarItem({ icon, label, active, onClick }) {
   return <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all cursor-pointer">{icon} <span className="font-medium">{label}</span></div>;
 }
 
-function DashboardView({ currentAttempt, status, threats, chartData, connected, uptimeStr, lockoutTimer, configParams }) {
+function DashboardView({ currentAttempt, status, threats, chartData, connected, uptimeStr, lockoutTimer, configParams, recentLogsData }) {
   return (
     <>
       <div className="grid grid-cols-4 gap-6 mb-8">
@@ -175,7 +178,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-3 gap-6 mb-6">
           <div className="col-span-2 glass p-6 rounded-3xl min-h-[350px] flex flex-col border border-white/5">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-bold text-lg text-white">Traffic Analysis</h3>
@@ -218,6 +221,38 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
                 <p className="text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Live Socket Status</p>
                 <code className={`text-xs ${connected ? 'text-indigo-300' : 'text-rose-400'}`}>{connected ? '> ws://localhost:8000/ws [OK]' : '> Socket disconnected...'}</code>
             </div>
+          </div>
+        </div>
+
+        {/* NEW: Event Ledger Table */}
+        <div className="glass p-6 rounded-3xl border border-white/5">
+          <div className="flex items-center gap-2 mb-4">
+             <ListFilter size={20} className="text-indigo-400" />
+             <h3 className="font-bold text-lg text-white">System Event Ledger</h3>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-800/50">
+             <table className="w-full text-sm text-left">
+                <thead className="text-xs text-slate-400 uppercase bg-slate-900/80 border-b border-slate-800">
+                   <tr>
+                      <th className="px-5 py-4 font-bold">Time</th>
+                      <th className="px-5 py-4 font-bold">Event Log</th>
+                      <th className="px-5 py-4 font-bold">Details</th>
+                   </tr>
+                </thead>
+                <tbody>
+                   {recentLogsData.length === 0 ? (
+                      <tr><td colSpan="3" className="px-5 py-6 text-center text-slate-500 italic">No events currently recorded in database.</td></tr>
+                   ) : (
+                      recentLogsData.map((log, i) => (
+                         <tr key={i} className="border-b border-slate-800/50 hover:bg-white/5 transition-colors bg-black/20">
+                            <td className="px-5 py-3 text-slate-400 font-mono text-xs">{log.time}</td>
+                            <td className="px-5 py-3 text-indigo-300 font-medium capitalize">{log.event.replace('_', ' ')}</td>
+                            <td className="px-5 py-3 text-slate-300 font-mono text-xs">{log.details}</td>
+                         </tr>
+                      ))
+                   )}
+                </tbody>
+             </table>
           </div>
         </div>
     </>
@@ -300,28 +335,66 @@ function SecurityView({ configParams, fetchAnalytics, addLog }) {
 
 function LogsView({ logs }) {
   const scrollRef = useRef(null);
+  const [filter, setFilter] = useState('ALL'); // NEW: Filter State
+
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [logs]);
+  }, [logs, filter]);
+
+  // NEW: Filtering Logic
+  const filteredLogs = logs.filter(log => {
+    if (filter === 'ALL') return true;
+    if (filter === 'SYSTEM') return log.includes('SYSTEM:');
+    if (filter === 'HARDWARE') return log.includes('RECV:');
+    if (filter === 'SECURITY') return log.includes('SUCCESS') || log.includes('DENIED') || log.includes('LOCKOUT');
+    return true;
+  });
+
+  // NEW: Download logic
+  const downloadLogs = () => {
+    const blob = new Blob([logs.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cipher_node_logs_${new Date().getTime()}.txt`;
+    a.click();
+  };
 
   return (
-    <div className="glass rounded-3xl h-[80%] flex flex-col overflow-hidden border border-slate-700/50 shadow-2xl">
+    <div className="glass rounded-3xl h-[85%] flex flex-col overflow-hidden border border-slate-700/50 shadow-2xl">
       <div className="bg-slate-900/80 px-6 py-4 flex items-center justify-between border-b border-slate-800">
         <div className="flex items-center gap-3">
           <Terminal size={18} className="text-indigo-400" />
           <h3 className="font-mono text-sm font-bold text-slate-300">Live Hardware Stream</h3>
         </div>
-        <div className="flex gap-2">
-          <div className="w-3 h-3 rounded-full bg-rose-500/50"></div>
-          <div className="w-3 h-3 rounded-full bg-amber-500/50"></div>
-          <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
+        
+        {/* NEW: Interactive Filter Toggles */}
+        <div className="flex gap-2 bg-[#020617] p-1 rounded-xl border border-slate-800">
+            <button onClick={() => setFilter('ALL')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'ALL' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>ALL</button>
+            <button onClick={() => setFilter('HARDWARE')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'HARDWARE' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>HARDWARE</button>
+            <button onClick={() => setFilter('SYSTEM')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'SYSTEM' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>SYSTEM</button>
+            <button onClick={() => setFilter('SECURITY')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'SECURITY' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>SECURITY</button>
+        </div>
+
+        <div className="flex items-center gap-6">
+          {/* NEW: Export Button */}
+          <button onClick={downloadLogs} className="flex items-center gap-2 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+              <Download size={14}/> Export
+          </button>
+          
+          <div className="flex gap-2">
+            <div className="w-3 h-3 rounded-full bg-rose-500/50"></div>
+            <div className="w-3 h-3 rounded-full bg-amber-500/50"></div>
+            <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
+          </div>
         </div>
       </div>
+      
       <div className="flex-1 bg-black/60 p-6 overflow-y-auto font-mono text-sm leading-relaxed" ref={scrollRef}>
-        {logs.length === 0 ? (
-          <span className="text-slate-600">Awaiting data stream...</span>
+        {filteredLogs.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-slate-600 italic">No logs match the current filter...</div>
         ) : (
-          logs.map((log, index) => (
+          filteredLogs.map((log, index) => (
             <div key={index} className="mb-1">
               <span className="text-slate-500">{log.substring(0, 13)}</span>
               <span className={`${log.includes('RECV:') ? 'text-indigo-400' : log.includes('SUCCESS') ? 'text-emerald-400' : log.includes('DENIED') || log.includes('LOCKOUT') ? 'text-rose-400' : 'text-slate-300'}`}>
