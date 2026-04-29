@@ -52,7 +52,23 @@ def get_recent_attempts():
         
     return formatted_data
 
-# NEW: Purge function for the Security Dashboard
+# NEW: Fetch recent raw events for the Dashboard Ledger
+def get_recent_logs(limit=6):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT timestamp, event, details FROM logs ORDER BY id DESC LIMIT ?", (limit,))
+    data = c.fetchall()
+    conn.close()
+    
+    formatted_data = []
+    for row in data: 
+        formatted_data.append({
+            "time": row[0][-8:], 
+            "event": row[1],
+            "details": row[2]
+        })
+    return formatted_data
+
 def wipe_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()

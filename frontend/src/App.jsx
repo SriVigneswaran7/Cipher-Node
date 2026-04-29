@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Activity, Lock, Terminal, Settings, Save, AlertTriangle, RefreshCcw } from 'lucide-react';
+import { Shield, Activity, Lock, Terminal, Settings, Save, AlertTriangle, ListFilter, Download, RefreshCcw } from 'lucide-react';
 import { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function App() {
@@ -9,9 +9,9 @@ export default function App() {
   const [status, setStatus] = useState("LOCKED");
   const [connected, setConnected] = useState(false);
   const [chartData, setChartData] = useState([]);
+  const [recentLogsData, setRecentLogsData] = useState([]); 
   const [threats, setThreats] = useState(0);
   
-  // New State variables
   const [uptimeStr, setUptimeStr] = useState("00h 00m 00s");
   const [configParams, setConfigParams] = useState({ pin: "404", timeout: 5000 });
   const [lockoutTimer, setLockoutTimer] = useState(0);
@@ -21,7 +21,7 @@ export default function App() {
   ]);
 
   const addLog = (message) => {
-    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-50));
+    setLiveLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`].slice(-100)); 
   };
 
   const fetchAnalytics = async () => {
@@ -29,10 +29,10 @@ export default function App() {
       const res = await fetch('http://localhost:8000/analytics');
       const data = await res.json();
       setChartData(data.recent_attempts || []);
+      setRecentLogsData(data.recent_logs || []); 
       setThreats(data.recent_attempts.filter(a => a.status === 'DENIED').length);
       setConfigParams(data.current_config);
       
-      // Format Live Uptime
       const hours = Math.floor(data.uptime_seconds / 3600);
       const minutes = Math.floor((data.uptime_seconds % 3600) / 60);
       const seconds = data.uptime_seconds % 60;
@@ -42,13 +42,13 @@ export default function App() {
 
   useEffect(() => {
     fetchAnalytics();
-    const interval = setInterval(fetchAnalytics, 1000); // Poll every second for the clock
+    const interval = setInterval(fetchAnalytics, 1000);
 
     const ws = new WebSocket('ws://localhost:8000/ws');
 
     ws.onopen = () => {
       setConnected(true);
-      addLog("SOCKET: Connected to Brain.");
+      addLog("SYSTEM: Connected to Logic Brain.");
     };
     
     ws.onclose = () => setConnected(false);
@@ -63,12 +63,16 @@ export default function App() {
         setCurrentAttempt(data.current);
       } else if (data.type === "AUTH_RESULT") {
         setStatus(data.status === "SUCCESS" ? "UNLOCKED" : "LOCKED");
+        if (data.status === "SUCCESS") {
+            addLog("SUCCESS: Node Unlocked.");
+        }
         if (data.status === "LOCKED") setCurrentAttempt("");
         fetchAnalytics(); 
       } else if (data.type === "SYSTEM_LOCKOUT") {
         setStatus("LOCKED_OUT");
         setLockoutTimer(data.duration);
         setCurrentAttempt("BLK");
+        addLog(`LOCKOUT: Threat detected. Node frozen for ${data.duration}s.`);
       }
     };
 
@@ -78,7 +82,6 @@ export default function App() {
     };
   }, []);
 
-  // Handle local countdown for the lockout
   useEffect(() => {
     if (lockoutTimer > 0) {
       const timer = setTimeout(() => setLockoutTimer(lockoutTimer - 1), 1000);
@@ -126,7 +129,7 @@ export default function App() {
         </header>
 
         <div className="relative z-10 h-full">
-          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} uptimeStr={uptimeStr} lockoutTimer={lockoutTimer} configParams={configParams} />}
+          {activeTab === 'dashboard' && <DashboardView currentAttempt={currentAttempt} status={status} threats={threats} chartData={chartData} connected={connected} uptimeStr={uptimeStr} lockoutTimer={lockoutTimer} configParams={configParams} recentLogsData={recentLogsData} />}
           {activeTab === 'security' && <SecurityView configParams={configParams} fetchAnalytics={fetchAnalytics} addLog={addLog} />}
           {activeTab === 'logs' && <LogsView logs={liveLogs} />}
         </div>
@@ -142,7 +145,7 @@ function SidebarItem({ icon, label, active, onClick }) {
   return <div onClick={onClick} className="flex items-center gap-4 px-4 py-3 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all cursor-pointer">{icon} <span className="font-medium">{label}</span></div>;
 }
 
-function DashboardView({ currentAttempt, status, threats, chartData, connected, uptimeStr, lockoutTimer, configParams }) {
+function DashboardView({ currentAttempt, status, threats, chartData, connected, uptimeStr, lockoutTimer, configParams, recentLogsData }) {
   return (
     <>
       <div className="grid grid-cols-4 gap-6 mb-8">
@@ -175,7 +178,7 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-3 gap-6 mb-6">
           <div className="col-span-2 glass p-6 rounded-3xl min-h-[350px] flex flex-col border border-white/5">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-bold text-lg text-white">Traffic Analysis</h3>
@@ -218,6 +221,37 @@ function DashboardView({ currentAttempt, status, threats, chartData, connected, 
                 <p className="text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-wider">Live Socket Status</p>
                 <code className={`text-xs ${connected ? 'text-indigo-300' : 'text-rose-400'}`}>{connected ? '> ws://localhost:8000/ws [OK]' : '> Socket disconnected...'}</code>
             </div>
+          </div>
+        </div>
+
+        <div className="glass p-6 rounded-3xl border border-white/5">
+          <div className="flex items-center gap-2 mb-4">
+             <ListFilter size={20} className="text-indigo-400" />
+             <h3 className="font-bold text-lg text-white">System Event Ledger</h3>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-800/50">
+             <table className="w-full text-sm text-left">
+                <thead className="text-xs text-slate-400 uppercase bg-slate-900/80 border-b border-slate-800">
+                   <tr>
+                      <th className="px-5 py-4 font-bold">Time</th>
+                      <th className="px-5 py-4 font-bold">Event Log</th>
+                      <th className="px-5 py-4 font-bold">Details</th>
+                   </tr>
+                </thead>
+                <tbody>
+                   {recentLogsData.length === 0 ? (
+                      <tr><td colSpan="3" className="px-5 py-6 text-center text-slate-500 italic">No events currently recorded in database.</td></tr>
+                   ) : (
+                      recentLogsData.map((log, i) => (
+                         <tr key={i} className="border-b border-slate-800/50 hover:bg-white/5 transition-colors bg-black/20">
+                            <td className="px-5 py-3 text-slate-400 font-mono text-xs">{log.time}</td>
+                            <td className="px-5 py-3 text-indigo-300 font-medium capitalize">{log.event.replace('_', ' ')}</td>
+                            <td className="px-5 py-3 text-slate-300 font-mono text-xs">{log.details}</td>
+                         </tr>
+                      ))
+                   )}
+                </tbody>
+             </table>
           </div>
         </div>
     </>
@@ -265,63 +299,126 @@ function SecurityView({ configParams, fetchAnalytics, addLog }) {
   };
 
   return (
-    <div className="glass p-8 rounded-3xl max-w-3xl">
-      <h2 className="text-xl font-bold text-white mb-6 border-b border-slate-800 pb-4">Access Control Panel</h2>
-      <div className="space-y-6">
-        <div>
-          <label className="block text-sm font-medium text-slate-400 mb-2">Node Admin PIN</label>
-          <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
-          <p className="text-xs text-slate-500 mt-2">Live updates immediately. Saved to node NVRAM.</p>
+    <div className="h-[85%] grid grid-cols-1 lg:grid-cols-5 gap-8">
+      
+      {/* Main Config Column */}
+      <div className="col-span-3 glass p-10 rounded-3xl flex flex-col border border-white/5 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[80px] pointer-events-none"></div>
+        
+        <div className="flex items-center gap-3 mb-8 border-b border-slate-800 pb-6">
+            <Settings size={28} className="text-indigo-400"/>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Access Control Panel</h2>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-400 mb-2">Auto-Lock Timeout (ms)</label>
-          <input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono" />
-          <p className="text-xs text-slate-500 mt-2">How long the physical relay remains open before auto-securing.</p>
-        </div>
-        <div className="pt-6 border-t border-slate-800 flex items-center gap-4">
-          <button onClick={handleUpdate} disabled={isSaving} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50">
-            <Save size={18} /> {isSaving ? "Updating..." : "Update Configuration"}
-          </button>
-          {message && <span className="text-sm font-medium text-emerald-400 animate-pulse">{message}</span>}
-        </div>
-        <div className="mt-8 p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
-          <div className="flex items-center gap-3 text-rose-400 font-bold mb-2"><AlertTriangle size={20} /> Danger Zone</div>
-          <p className="text-sm text-rose-400/80 mb-5">Wiping the audit database will permanently delete all threat logs and traffic analysis history. This action cannot be reversed.</p>
-          <div className="flex items-center gap-4">
-            <button onClick={handleWipe} className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-lg shadow-rose-500/20">Purge SQLite Database</button>
-            {wipeMessage && <span className="text-sm font-bold text-rose-400">{wipeMessage}</span>}
+        
+        <div className="space-y-8 flex-1">
+          <div>
+            <label className="block text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider">Node Admin PIN</label>
+            <div className="relative">
+              <Lock size={18} className="absolute left-4 top-3.5 text-slate-500" />
+              <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-xl pl-12 pr-4 py-3.5 text-white text-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono shadow-inner" />
+            </div>
+            <p className="text-xs text-slate-500 mt-2.5 font-medium">Live updates immediately. Saved to node NVRAM.</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider">Auto-Lock Timeout (ms)</label>
+            <div className="relative">
+              <Activity size={18} className="absolute left-4 top-3.5 text-slate-500" />
+              <input type="number" value={timeout} onChange={(e) => setTimeoutVal(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-xl pl-12 pr-4 py-3.5 text-white text-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono shadow-inner" />
+            </div>
+            <p className="text-xs text-slate-500 mt-2.5 font-medium">How long the physical relay remains open before auto-securing.</p>
           </div>
         </div>
+
+        <div className="pt-8 mt-4 border-t border-slate-800 flex items-center justify-between">
+          <button onClick={handleUpdate} disabled={isSaving} className="flex items-center gap-3 bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-xl font-bold transition-all disabled:opacity-50 shadow-[0_0_20px_rgba(79,70,229,0.3)]">
+            <Save size={20} /> {isSaving ? "Applying..." : "Apply Configuration"}
+          </button>
+          {message && <span className="text-sm font-bold text-emerald-400 animate-pulse bg-emerald-400/10 px-4 py-2 rounded-lg border border-emerald-400/20">{message}</span>}
+        </div>
       </div>
+
+      {/* Danger Zone Column */}
+      <div className="col-span-2 flex flex-col gap-8">
+        <div className="glass p-10 rounded-3xl border border-rose-500/20 bg-gradient-to-b from-rose-500/5 to-transparent flex flex-col h-full relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 blur-[80px] pointer-events-none"></div>
+            
+            <div className="flex items-center gap-3 mb-6">
+                <AlertTriangle size={28} className="text-rose-500" />
+                <h2 className="text-2xl font-bold text-rose-400 tracking-tight">Danger Zone</h2>
+            </div>
+            
+            <p className="text-base text-rose-400/80 mb-6 leading-relaxed flex-1">
+                Wiping the audit database will permanently delete all threat logs and traffic analysis history. 
+                <br/><br/>
+                This action cannot be reversed and will immediately clear the Dashboard's event ledger.
+            </p>
+
+            <div className="flex flex-col gap-4">
+                <button onClick={handleWipe} className="flex items-center justify-center gap-2 w-full bg-rose-500 hover:bg-rose-600 text-white px-6 py-4 rounded-xl text-base font-bold transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)]">
+                    <RefreshCcw size={18} /> Purge SQLite Database
+                </button>
+                {wipeMessage && <span className="text-sm font-bold text-rose-400 text-center bg-rose-500/10 py-2 rounded-lg border border-rose-500/20 animate-pulse">{wipeMessage}</span>}
+            </div>
+        </div>
+      </div>
+
     </div>
   )
 }
 
 function LogsView({ logs }) {
   const scrollRef = useRef(null);
+  const [filter, setFilter] = useState('ALL');
+
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [logs]);
+  }, [logs, filter]);
+
+  const filteredLogs = logs.filter(log => {
+    if (filter === 'ALL') return true;
+    if (filter === 'SYSTEM') return log.includes('SYSTEM:');
+    if (filter === 'HARDWARE') return log.includes('RECV:');
+    if (filter === 'SECURITY') return log.includes('SUCCESS') || log.includes('DENIED') || log.includes('LOCKOUT');
+    return true;
+  });
+
+  const downloadLogs = () => {
+    const blob = new Blob([logs.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cipher_node_logs_${new Date().getTime()}.txt`;
+    a.click();
+  };
 
   return (
-    <div className="glass rounded-3xl h-[80%] flex flex-col overflow-hidden border border-slate-700/50 shadow-2xl">
+    <div className="glass rounded-3xl h-[85%] flex flex-col overflow-hidden border border-slate-700/50 shadow-2xl">
       <div className="bg-slate-900/80 px-6 py-4 flex items-center justify-between border-b border-slate-800">
         <div className="flex items-center gap-3">
           <Terminal size={18} className="text-indigo-400" />
           <h3 className="font-mono text-sm font-bold text-slate-300">Live Hardware Stream</h3>
         </div>
-        <div className="flex gap-2">
-          <div className="w-3 h-3 rounded-full bg-rose-500/50"></div>
-          <div className="w-3 h-3 rounded-full bg-amber-500/50"></div>
-          <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
+        
+        <div className="flex gap-2 bg-[#020617] p-1 rounded-xl border border-slate-800">
+            <button onClick={() => setFilter('ALL')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'ALL' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>ALL</button>
+            <button onClick={() => setFilter('HARDWARE')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'HARDWARE' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>HARDWARE</button>
+            <button onClick={() => setFilter('SYSTEM')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'SYSTEM' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>SYSTEM</button>
+            <button onClick={() => setFilter('SECURITY')} className={`px-4 py-1.5 text-[10px] font-bold tracking-wider rounded-lg transition-colors ${filter === 'SECURITY' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}>SECURITY</button>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <button onClick={downloadLogs} className="flex items-center gap-2 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
+              <Download size={14}/> Export
+          </button>
         </div>
       </div>
+      
       <div className="flex-1 bg-black/60 p-6 overflow-y-auto font-mono text-sm leading-relaxed" ref={scrollRef}>
-        {logs.length === 0 ? (
-          <span className="text-slate-600">Awaiting data stream...</span>
+        {filteredLogs.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-slate-600 italic">No logs match the current filter...</div>
         ) : (
-          logs.map((log, index) => (
+          filteredLogs.map((log, index) => (
             <div key={index} className="mb-1">
               <span className="text-slate-500">{log.substring(0, 13)}</span>
               <span className={`${log.includes('RECV:') ? 'text-indigo-400' : log.includes('SUCCESS') ? 'text-emerald-400' : log.includes('DENIED') || log.includes('LOCKOUT') ? 'text-rose-400' : 'text-slate-300'}`}>
