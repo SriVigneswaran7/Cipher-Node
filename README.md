@@ -38,7 +38,7 @@ The frontend is a React application built with Vite and Tailwind CSS v4, utilisi
 
 * **Real-Time Analytics:** Displays live hardware input sequencing, visualises the last 7 access attempts via Recharts, and features a live System Event Ledger pulling directly from SQLite.
 * **Node Settings:** Allows administrators to dynamically rewrite the backend `.env` configuration (PIN and timeouts) on the fly, and includes a secure interface to purge the audit database.
-* **Telemetry Stream:** A dedicated terminal interface streaming raw JSON packets directly from the hardware and backend. Includes interactive filters to isolate hardware, system, or security events, plus CSV export functionality. |
+* **Telemetry Stream:** A dedicated terminal interface streaming raw JSON packets directly from the hardware and backend. Includes interactive filters to isolate hardware, system, or security events, plus CSV export functionality.
 
 ---
 
@@ -122,3 +122,6 @@ Open `http://localhost:5173` in your web browser. The dashboard will automatical
 * **Brute-Force Lockout:** The Python server monitors failed attempts. Upon 3 consecutive failures, the backend ignores all physical inputs for 60 seconds and broadcasts a lockdown alert to the dashboard.
 * **NVRAM Live Updates:** The UI can dynamically rewrite the backend `.env` file via secure POST requests, allowing administrators to update access codes and relay timeouts instantly without a hard server reboot.
 * **Immutable Audit Logging:** Every physical interaction, hardware timeout, and configuration change is tracked, permanently logged in SQLite, and streamable in the raw Live Logs terminal.
+
+---
+*Developed by Sri Vigneswaran under the [MIT License](./LICENSE)*
